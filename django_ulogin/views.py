@@ -15,6 +15,7 @@ from django_ulogin.models import ULoginUser, create_user
 from django_ulogin.signals import assign
 from django_ulogin.forms import PostBackForm
 from django_ulogin.utils import import_by_path
+from django.contrib.auth import logout
 import requests
 import json
 import logging
@@ -204,3 +205,30 @@ class IdentityDeleteView(ULoginMixin, DeleteView):
         return render(request, self.template_name,
                       {'instance': self.get_object()
                        })
+
+
+class PostBackViewFixed(PostBackView):
+    def form_valid(self, form):
+        """
+        The request from ulogin service is correct
+        """
+        response = self.ulogin_response(form.cleaned_data['token'],
+                                        self.request.get_host())
+
+        if 'error' in response:
+            return render(self.request, self.error_template_name,
+                          {'json': response})
+
+        if get_user(self.request).is_authenticated():
+            logout(self.request)
+
+        user, identity, registered = \
+            self.handle_anonymous_user(response)
+
+        assign.send(sender=ULoginUser,
+                    user=get_user(self.request),
+                    request=self.request,
+                    registered=registered,
+                    ulogin_user=identity,
+                    ulogin_data=response)
+        return redirect(self.request.GET.get(REDIRECT_FIELD_NAME) or '/')
